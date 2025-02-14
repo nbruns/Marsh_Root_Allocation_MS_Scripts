@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ns3:systemMetadata xmlns:ns2="http://ns.dataone.org/service/types/v1" xmlns:ns3="http://ns.dataone.org/service/types/v2.0">
+    <serialVersion>14</serialVersion>
+    <identifier>ess-dive-3eaf5e2a7f09e5b-20241008T201211356</identifier>
+    <formatId>application/pdf</formatId>
+    <size>68827</size>
+    <checksum algorithm="MD5">4b45a26fde351ab5ed0483914b8a230c</checksum>
+    <submitter>http://orcid.org/0000-0002-9518-2243</submitter>
+    <rightsHolder>http://orcid.org/0000-0002-9518-2243</rightsHolder>
+    <accessPolicy>
+        <allow>
+            <subject>CN=ess-dive-admins,DC=dataone,DC=org</subject>
+            <permission>read</permission>
+            <permission>write</permission>
+            <permission>changePermission</permission>
+        </allow>
+        <allow>
+            <subject>CN=urn:node:ESS_DIVE,DC=dataone,DC=org</subject>
+            <permission>read</permission>
+            <permission>write</permission>
+            <permission>changePermission</permission>
+        </allow>
+        <allow>
+            <subject>public</subject>
+            <permission>read</permission>
+        </allow>
+        <allow>
+            <subject>CN=ess-dive-publish,DC=dataone,DC=org</subject>
+            <permission>read</permission>
+        </allow>
+    </accessPolicy>
+    <replicationPolicy replicationAllowed="true" numberReplicas="2">
+        <preferredMemberNode>urn:node:KNB</preferredMemberNode>
+        <preferredMemberNode>urn:node:mnORC1</preferredMemberNode>
+        <preferredMemberNode>urn:node:KNB</preferredMemberNode>
+        <preferredMemberNode>urn:node:mnORC1</preferredMemberNode>
+        <blockedMemberNode>urn:node:mnUNM1</blockedMemberNode>
+        <blockedMemberNode>urn:node:mnUCSB1</blockedMemberNode>
+        <blockedMemberNode>urn:node:US_MPC</blockedMemberNode>
+        <blockedMemberNode>urn:node:NMEPSCOR</blockedMemberNode>
+        <blockedMemberNode>urn:node:PPBIO</blockedMemberNode>
+        <blockedMemberNode>urn:node:mnUNM1</blockedMemberNode>
+        <blockedMemberNode>urn:node:mnUCSB1</blockedMemberNode>
+        <blockedMemberNode>urn:node:US_MPC</blockedMemberNode>
+        <blockedMemberNode>urn:node:NMEPSCOR</blockedMemberNode>
+        <blockedMemberNode>urn:node:PPBIO</blockedMemberNode>
+    </replicationPolicy>
+    <archived>false</archived>
+    <dateUploaded>2024-10-08T20:12:11.980+00:00</dateUploaded>
+    <dateSysMetadataModified>2024-10-15T00:01:29.791+00:00</dateSysMetadataModified>
+    <originMemberNode>urn:node:ESS_DIVE</originMemberNode>
+    <authoritativeMemberNode>urn:node:ESS_DIVE</authoritativeMemberNode>
+    <replica>
+        <replicaMemberNode>urn:node:ESS_DIVE</replicaMemberNode>
+        <replicationStatus>completed</replicationStatus>
+        <replicaVerified>2025-02-11T19:06:51.117+00:00</replicaVerified>
+    </replica>
+    <fileName>variable_descriptions.pdf</fileName>
+</ns3:systemMetadata>

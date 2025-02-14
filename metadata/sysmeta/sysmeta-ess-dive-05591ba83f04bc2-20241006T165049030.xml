@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ns3:systemMetadata xmlns:ns2="http://ns.dataone.org/service/types/v1" xmlns:ns3="http://ns.dataone.org/service/types/v2.0">
+    <serialVersion>14</serialVersion>
+    <identifier>ess-dive-05591ba83f04bc2-20241006T165049030</identifier>
+    <formatId>text/csv</formatId>
+    <size>33530</size>
+    <checksum algorithm="MD5">1dc14ac14ee18d2d13a8d33e207c2b5a</checksum>
+    <submitter>http://orcid.org/0000-0002-9518-2243</submitter>
+    <rightsHolder>http://orcid.org/0000-0002-9518-2243</rightsHolder>
+    <accessPolicy>
+        <allow>
+            <subject>CN=ess-dive-admins,DC=dataone,DC=org</subject>
+            <permission>read</permission>
+            <permission>write</permission>
+            <permission>changePermission</permission>
+        </allow>
+        <allow>
+            <subject>public</subject>
+            <permission>read</permission>
+        </allow>
+        <allow>
+            <subject>CN=ess-dive-publish,DC=dataone,DC=org</subject>
+            <permission>read</permission>
+        </allow>
+        <allow>
+            <subject>CN=urn:node:ESS_DIVE,DC=dataone,DC=org</subject>
+            <permission>read</permission>
+            <permission>write</permission>
+            <permission>changePermission</permission>
+        </allow>
+    </accessPolicy>
+    <replicationPolicy replicationAllowed="true" numberReplicas="2">
+        <preferredMemberNode>urn:node:KNB</preferredMemberNode>
+        <preferredMemberNode>urn:node:mnORC1</preferredMemberNode>
+        <preferredMemberNode>urn:node:KNB</preferredMemberNode>
+        <preferredMemberNode>urn:node:mnORC1</preferredMemberNode>
+        <blockedMemberNode>urn:node:mnUNM1</blockedMemberNode>
+        <blockedMemberNode>urn:node:mnUCSB1</blockedMemberNode>
+        <blockedMemberNode>urn:node:US_MPC</blockedMemberNode>
+        <blockedMemberNode>urn:node:NMEPSCOR</blockedMemberNode>
+        <blockedMemberNode>urn:node:PPBIO</blockedMemberNode>
+        <blockedMemberNode>urn:node:mnUNM1</blockedMemberNode>
+        <blockedMemberNode>urn:node:mnUCSB1</blockedMemberNode>
+        <blockedMemberNode>urn:node:US_MPC</blockedMemberNode>
+        <blockedMemberNode>urn:node:NMEPSCOR</blockedMemberNode>
+        <blockedMemberNode>urn:node:PPBIO</blockedMemberNode>
+    </replicationPolicy>
+    <archived>false</archived>
+    <dateUploaded>2024-10-06T16:50:50.449+00:00</dateUploaded>
+    <dateSysMetadataModified>2024-10-15T00:01:25.226+00:00</dateSysMetadataModified>
+    <originMemberNode>urn:node:ESS_DIVE</originMemberNode>
+    <authoritativeMemberNode>urn:node:ESS_DIVE</authoritativeMemberNode>
+    <replica>
+        <replicaMemberNode>urn:node:ESS_DIVE</replicaMemberNode>
+        <replicationStatus>completed</replicationStatus>
+        <replicaVerified>2025-02-11T19:06:56.070+00:00</replicaVerified>
+    </replica>
+    <fileName>SMARTX_data_2017_2022.csv</fileName>
+</ns3:systemMetadata>

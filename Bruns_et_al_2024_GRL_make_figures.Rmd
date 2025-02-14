@@ -1,0 +1,688 @@
+---
+title: "A test of functional balance theory for wetland biomass allocation in a global change experiment"
+author: "Nick Bruns, Genevienve Noce, Pat Megonigal, Matt Kirwan"
+email: nebruns@vims.edu
+date: "2024-11-15"
+output:
+  bookdown:::word_document2:
+    number_sections: false
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE, 
+  message = FALSE, 
+  echo = FALSE
+  )
+
+
+# source("prepare_workspace.R")
+library(tidyverse)
+library(patchwork)
+library(scales)
+library(modelr)
+
+theme_set(theme_classic(base_size=12))
+
+```
+
+```{r science-constants}
+#### #### 
+#### 1.1 Science constants
+#### ####
+moles_per_gram_amonium<- 0.055437
+grams_per_mol_amonium <- 1/moles_per_gram_amonium
+grams_n_per_gram_ammonium <-  0.776490
+
+## I use the below conversion to make units in functional balance equation consistent
+    ##N% * g/hour C = g/hour N
+    ## thus, convert uptake rates
+        ###from: umol NH4/hour  
+        ###to: g N/ hour
+    ##handling both
+        #moles to mass
+        #stoichiometry of NH4
+  
+  #this assumes published uptake rates are the speed of NH4 uptake,
+      # not of N uptake, which to my knowledge is true here.
+
+CONVERSION_UMOL_NH4_PER_HOUR_TO_GRAMS_N_PER_HOUR <-
+  grams_per_mol_amonium*grams_n_per_gram_ammonium/10^6
+
+#### #### 
+#### 1.2 parameters for the study
+#### ####
+GLOBAL_TISSUE_N_PCT <- .02 ## this is from Morris 2013
+V_MAX_COTT_UMOL_PER_G_PER_HOUR <- 17 # From Cott et. al 2018
+```
+
+
+```{r prep-data}
+
+biomass_data_full_depth_porewater <- read_csv("SMARTX_data_2017_2022.csv")
+##now, do depth averages of the porewater NH3 (matching PNAS paper)
+biomass_data_summarized_porewater_treatment_means <- biomass_data_full_depth_porewater %>% 
+  filter(Vegetation=="C3") %>% 
+  filter(Depth %in% c(20,40,80,120)) %>%   
+  # select(-c(N,sd,se,ci)) %>% 
+  group_by(Year,CO2Treatment,TempTreatment) %>% 
+  summarise_all(mean,na.rm=T)  %>% 
+  ungroup() 
+
+
+            
+##finally, summarize across years
+biomass_data_treatment_means_many_year_means <-
+  biomass_data_summarized_porewater_treatment_means %>% 
+  ungroup() %>% 
+  group_by(CO2Treatment,TempTreatment) %>% 
+  summarise_all(mean,na.rm=T) %>% #means of all values
+  select(-c(Depth,PlotID,Year,Vegetation)) %>%  #remove artifact values from summary, e.g. mean plotid
+  select(-starts_with("wt_")) %>% 
+  select(-starts_with("total_")) 
+
+biomass_data_treatment_means_many_year_means
+```
+
+
+```{r common-plotting-lines}
+  temp_pallette_four_colors <- viridis_pal(option = "C")(4)
+    # four_colors[4] <- "greenyellow"
+  temp_pallette_four_colors [4] <- "chartreuse"
+    
+
+
+##for ease of figure rendering below, I will collect a few of the specific lines
+  ##for formatting figures
+scale_shapes_for_co2_treatment <-   scale_shape_manual(values = c(21,19),
+                      name = expression(paste("CO"[2], " treatment"))) 
+
+
+
+
+lab_string_porewater_nh4 <- bquote(atop("porewater NH"[4], mu*mol~L^-1))
+lab_string_porewater_nh4_NO_LINEBREAK <- bquote("porewater NH"[4] ~ (mu*mol ~ L^-1))
+lab_string_u_rate <- bquote("u estimate" ~ (mu*mol ~ NH[4] ~ hr^-1))
+lab_string_N_demand <- bquote("N demand" ~ (g ~ hr^-1)) #"N demand (g/hr)"
+lab_string_total_N_uptake<- bquote("total N uptake" ~ (g ~ hr^-1)) #"N demand (g/hr)"
+lab_string_N_supply <-  bquote("N supply" ~ (mu*mol ~ L^-1))
+  
+ 
+
+lab_string_temperature_treatment <- "Temperature (\u00B0C above ambient)"
+lab_string_bg_npp <- bquote(atop("bg NPP", (g~m^-2~ ~yr^-1)))
+lab_string_fnpp <- bquote(atop("FNPP", (g~m^-2~ ~yr^-1)))
+lab_string_predicted_fnpp <- bquote(atop("predicted FNPP", (g~m^-2~ ~yr^-1)))
+lab_string_measured_fnpp <- bquote(atop("measured FNPP", (g~m^-2~ ~yr^-1)))
+lab_string_measured_fnpp_ONE_LINE <- bquote("FNPP" ~ (g~m^-2~ ~yr^-1))
+lab_string_ag_biomass <- bquote(atop("peak ag biomass", (g~m^-2)))
+lab_string_fr_biomass <- bquote(atop("fine root biomass", (g~m^-2)))
+lab_string_annual_root_growth <- expression(paste("annual root growth (g/m"^"2",")"))
+
+
+p_facet_label_string <- "p estimate (g C per hr)"
+u_facet_label_string <- "u estimate (\u03BCmol NH4 per hr)"
+
+###color choices
+p_color <- "darkgreen"
+u_color <- "brown"
+
+
+###plot aesthetics
+point_size_unscaled_rate_plot <- 3
+point_size_discussion_plot <- 3
+```
+
+```{r fit-parameters-on-data}
+###2 parts of code block
+###### ######
+##  1/2 define and fit model
+###### ######
+
+roots_shoots_5.1_aco2 <- biomass_data_treatment_means_many_year_means %>% 
+  filter(TempTreatment==5.1) %>% 
+  filter(CO2Treatment=="Amb") %>% 
+  select(FineRoots_correct,SCAMbiomass,NH4.uM)
+
+tissue_N_content <- .02
+
+m_menten_kinetics <- function(conc,k_m_arg,v_max_arg){
+  (v_max_arg * conc) / (conc+ k_m_arg)
+}
+
+
+nls_fit_model_cott_max <- nls( FineRoots_correct ~
+                  (T*SCAMbiomass ^2*  tissue_N_content)/
+                  (m_menten_kinetics(NH4.uM,k_m,V_MAX_COTT_UMOL_PER_G_PER_HOUR)*
+                       CONVERSION_UMOL_NH4_PER_HOUR_TO_GRAMS_N_PER_HOUR),
+    data = biomass_data_treatment_means_many_year_means,
+    start = list(k_m=100,T=.1))
+
+
+###### ######
+##  2/2 make plot data
+###### ######
+
+# plot_data_try_1 <- biomass_data_summarized_porewater_treatment_means %>% 
+root_plot_data <- biomass_data_treatment_means_many_year_means %>% 
+  add_predictions(nls_fit_model_cott_max) %>% 
+  rename(FineRoots_predicted=pred)
+    
+cot_max_rmse <- rmse(nls_fit_model_cott_max,biomass_data_treatment_means_many_year_means)
+cot_max_rsquare <- rsquare(nls_fit_model_cott_max,biomass_data_treatment_means_many_year_means)
+cot_max_rsquare
+
+N_pollution <- 200
+
+root_plot_data_plus_200  <- biomass_data_treatment_means_many_year_means %>% 
+  mutate(NH4.uM=NH4.uM + N_pollution) %>% 
+  add_predictions(nls_fit_model_cott_max) %>% 
+  rename(FineRoots_predicted=pred)
+
+
+
+```
+
+
+
+```{r fig-1-WITH-SE}
+      
+point_size_fig_1 <- 3
+
+
+biomass_data_summarized_porewater_SE_PRESERVE <- biomass_data_full_depth_porewater %>% 
+  filter(Vegetation=="C3") %>% 
+  filter(Depth %in% c(20,40,80,120)) %>%   
+  group_by(Year,CO2Treatment,TempTreatment,PlotID) %>% 
+  summarise_all(mean,na.rm=T)  %>% 
+  ungroup() 
+
+
+ 
+  biomass_data_treatment_means_many_year_means_WITH_SE <-
+    biomass_data_summarized_porewater_SE_PRESERVE %>% 
+    ungroup() %>% 
+    group_by(CO2Treatment, TempTreatment) %>% 
+    summarise_all(list(mean = ~ mean(., na.rm = TRUE), 
+                       length_check= ~ length(.),
+                       se = ~ sd(., na.rm = TRUE) / sqrt(length(.)))) 
+   
+
+ag_biomass_panel <-
+  biomass_data_treatment_means_many_year_means_WITH_SE %>%
+  ungroup() %>% 
+  ggplot(aes(x = TempTreatment, y= SCAMbiomass_mean,  shape = CO2Treatment)) +
+  geom_point(size = point_size_fig_1) +
+  geom_line(data = biomass_data_treatment_means_many_year_means_WITH_SE %>% filter(CO2Treatment == "Amb")) + # optional line addition
+  ylab(lab_string_ag_biomass) + 
+  geom_errorbar(aes(ymin = SCAMbiomass_mean - SCAMbiomass_se, ymax = SCAMbiomass_mean + SCAMbiomass_se), width = 0.2) + # Add error bars
+  scale_shapes_for_co2_treatment +
+  theme(legend.position = "none") +
+  xlab(NULL)
+
+roots_across_treatment_plot <-
+  biomass_data_treatment_means_many_year_means_WITH_SE %>%
+  ggplot(aes(x = TempTreatment, y = FineRoots_correct_mean, shape = CO2Treatment)) +
+  geom_point(size = point_size_fig_1) +
+  geom_line(data = 
+              biomass_data_treatment_means_many_year_means_WITH_SE %>% filter(CO2Treatment == "Amb")) + 
+  geom_errorbar(aes(ymin = FineRoots_correct_mean - FineRoots_correct_se, ymax = FineRoots_correct_mean + FineRoots_correct_se), width = 0.2) + # Add error bars
+  scale_shapes_for_co2_treatment +
+  xlab(NULL)  +
+  theme(legend.position = "none") +
+  # ylab(lab_string_annual_root_growth) 
+  ylab(lab_string_fnpp) 
+
+porewater_panel <-
+  biomass_data_treatment_means_many_year_means_WITH_SE %>%
+  ggplot(aes(y = NH4.uM_mean, x = TempTreatment, shape = CO2Treatment)) +
+  geom_point(size = point_size_fig_1) +
+  geom_line(data = biomass_data_treatment_means_many_year_means_WITH_SE %>% filter(CO2Treatment == "Amb")) + 
+  ylab(lab_string_porewater_nh4) +
+  geom_errorbar(aes(ymin = NH4.uM_mean - NH4.uM_se, ymax = NH4.uM_mean + NH4.uM_se), width = 0.2) + # Add error bars
+  scale_shapes_for_co2_treatment +
+  theme(legend.position = "none") +
+  xlab(lab_string_temperature_treatment)
+
+r_s_ratio_panel <-
+  biomass_data_treatment_means_many_year_means_WITH_SE %>%
+  mutate(
+    r_s_ratio = FineRoots_correct_mean / SCAMbiomass_mean,
+    r_s_ratio_se = abs(r_s_ratio) * sqrt((FineRoots_correct_se / FineRoots_correct_mean)^2 + (SCAMbiomass_se / SCAMbiomass_mean)^2)
+  ) %>%
+  ggplot(aes(x = TempTreatment, y = r_s_ratio, shape = CO2Treatment )) +
+  geom_point(size = point_size_fig_1) +
+  geom_line(data = . %>% filter(CO2Treatment == "Amb")) +
+  ylab("R:S ratio") +
+  geom_errorbar(aes(ymin = r_s_ratio - r_s_ratio_se, ymax = r_s_ratio + r_s_ratio_se), width = 0.2) +
+  scale_shapes_for_co2_treatment +
+  xlab(NULL) +
+  theme(legend.position = "none")
+
+
+ag_biomass_panel /
+  roots_across_treatment_plot /
+  r_s_ratio_panel /
+  porewater_panel
+
+```
+
+
+
+```{r fig-2-WITH-SE,fig.width=9}
+##new figure 2
+  ##shows the root prediction
+  ##and a predicted vs. observed plot
+
+  #could potentially do 2 version for the 2 models, and this could be moved to supplemental if need be
+
+##First, get dimensions of plot
+    # I like doing these square so you know what the mis-predictions are
+ ##insert SE plot
+
+
+root_plot_data_WITH_SE <- biomass_data_treatment_means_many_year_means_WITH_SE %>% 
+  add_predictions(nls_fit_model_cott_max) %>% 
+  rename(FineRoots_predicted=pred) %>% 
+  rename(FineRoots_correct=FineRoots_correct_mean)
+
+  min_val <- root_plot_data_WITH_SE %>%
+    mutate(min_both=pmin(FineRoots_correct,FineRoots_predicted,na.rm = T)) %>% 
+    pull(min_both) %>% 
+    min()
+  
+  max_val <- root_plot_data_WITH_SE %>%
+    mutate(max_both=pmax(FineRoots_correct,FineRoots_predicted,na.rm = T)) %>% 
+    pull(max_both) %>% 
+    max()
+  
+ 
+ prediction_plot <-  root_plot_data_WITH_SE %>% 
+    ggplot(aes(x=FineRoots_correct,y=FineRoots_predicted)) +
+    geom_point(aes(shape=CO2Treatment),size=5) +
+    geom_abline() +
+    xlim(min_val,max_val) +
+    ylim(min_val,max_val) +
+    scale_color_viridis_c(option="C") +
+   scale_shapes_for_co2_treatment +
+   ylab(lab_string_predicted_fnpp) +
+    xlab(lab_string_measured_fnpp)
+ 
+ 
+  roots_across_treatment_plot <-  root_plot_data_WITH_SE %>% 
+    ggplot(aes(x=TempTreatment,y=FineRoots_correct,shape=CO2Treatment )) +
+    #plot predictions
+    geom_point(
+      aes(x=TempTreatment,y=FineRoots_predicted,shape=CO2Treatment),
+               color="red",
+               size=5) +
+    geom_line(data= . %>% filter(CO2Treatment=="Amb"),
+              aes(x=TempTreatment,
+                  y=FineRoots_predicted),
+              color="red")  +
+    #observation plot
+    geom_point(size=5) +
+    geom_line(data= .  %>% filter(CO2Treatment=="Amb")) +
+    scale_shape_manual(values = c(21,19),
+                       name = expression(paste("CO"[2], " treatment"))) +
+    theme(legend.position = "none") +
+    geom_errorbar(
+       aes(ymin = FineRoots_correct - FineRoots_correct_se, 
+           ymax = FineRoots_correct + FineRoots_correct_se), 
+       width = 0.2) +  # Add error bars
+    xlab(lab_string_temperature_treatment) +
+    ylab(lab_string_fnpp)
+
+ roots_across_treatment_plot | prediction_plot
+  
+```
+
+
+```{r declare-functions-for-prediction-lines}
+#### #### #### ####
+## declare figure functions 
+### ### ### ###
+    ##plot logic
+    compute_uptake_rate_from_NH4_mm_kinetics_umol_hr <-  function(
+        NH4_conc_umol_per_L,
+        v_max_arg,
+        k_m_arg){
+          
+          uptake_rate <- v_max_arg * NH4_conc_umol_per_L/
+                    (NH4_conc_umol_per_L + k_m_arg)   
+          
+          return(uptake_rate)
+        }
+      
+      compute_roots_from_NH4 <-  function(
+        N_supply_arg, 
+        N_demand_arg,
+        v_max_arg,
+        k_m_arg){
+        
+        uptake_guess_umol_per_hour <- compute_uptake_rate_from_NH4_mm_kinetics_umol_hr(
+          NH4_conc_umol_per_L=N_supply_arg,
+          v_max_arg = v_max_arg,
+          k_m_arg = k_m_arg
+        )
+          
+        annual_root_estimate <- N_demand_arg/(uptake_guess_umol_per_hour*CONVERSION_UMOL_NH4_PER_HOUR_TO_GRAMS_N_PER_YEAR)
+        
+        return(annual_root_estimate)
+      }
+
+
+
+```
+
+```{r data-prep-for-isoline-plot}
+
+make_regular_vector_from_field_data <- function(vector_resolution,field_vector){
+    seq(
+      from=min(field_vector),
+      to=max(field_vector),
+      length.out=vector_resolution
+      ) 
+}
+
+##consider moving these up to the top for easier maitenance
+res_NH4 <- 100
+res_roots <- 7
+
+ NH4.uM_vector_from_field_data <- 
+   make_regular_vector_from_field_data(
+     res_NH4, 
+     biomass_data_treatment_means_many_year_means$NH4.uM
+     )
+   
+all_plot_xlim <- c(min(NH4.uM_vector_from_field_data),
+                      max(NH4.uM_vector_from_field_data))
+
+iso_root_vector_RAW <- make_regular_vector_from_field_data(
+  res_roots,
+  biomass_data_treatment_means_many_year_means$FineRoots_correct
+) 
+
+iso_root_vector <- seq(from=85,length.out=res_roots, by=15) #hand specify a more readable version of root vector, same values
+
+##GET PARAMS FROM MODEL FIT
+  k_m_fit_value <- coef(nls_fit_model_cott_max)["k_m"] %>% as.numeric()
+  v_max_fit_value <- V_MAX_COTT_UMOL_PER_G_PER_HOUR
+  T_from_cott <- coef(nls_fit_model_cott_max)["T"] %>% as.numeric()
+
+  
+
+isoline_data <- expand_grid(iso_root_line=iso_root_vector,
+                       NH4.uM=NH4.uM_vector_from_field_data,
+) %>% 
+  mutate(uptake_rate_umol_hr=compute_uptake_rate_from_NH4_mm_kinetics_umol_hr(
+    NH4_conc_umol_per_L = NH4.uM,
+    v_max_arg = V_MAX_COTT_UMOL_PER_G_PER_HOUR,
+    k_m_arg = k_m_fit_value
+  ) )%>% 
+  # mutate(N_demand_prediction=iso_root_line*uptake_rate_umol_hr*CONVERSION_UMOL_NH4_PER_HOUR_TO_GRAMS_N_PER_YEAR) %>% 
+  mutate(total_uptake_prediction_g_per_hour=iso_root_line*uptake_rate_umol_hr*
+           CONVERSION_UMOL_NH4_PER_HOUR_TO_GRAMS_N_PER_HOUR)
+
+
+
+```
+
+```{r fig-3-supply-demand-space, eval=FALSE, include=FALSE}
+##these are for individual panels, assembled in powerpoint
+
+plot_xlims <- c(
+  min(NH4.uM_vector_from_field_data),
+  max(NH4.uM_vector_from_field_data)
+)
+
+plot_ylims <- c(.015,.033)
+
+
+  
+panel_B_no_Y_label <- biomass_data_treatment_means_many_year_means %>%
+  mutate(N_demand_guess=SCAMbiomass^2 *T_from_cott *   tissue_N_content  #trouble line
+  ) %>% 
+  
+  # filter(CO2Treatment == "Amb") %>%
+  arrange(TempTreatment) %>%
+  ggplot(aes(x = NH4.uM, y = N_demand_guess)) +
+  # geom_segment(aes(color = TempTreatment,
+  geom_line(data=isoline_data,
+            aes( group=iso_root_line,
+                 y=total_uptake_prediction_g_per_hour)
+  ) +
+  
+  geom_segment(data = . %>% filter(CO2Treatment == "Amb"),
+               aes(color = TempTreatment,
+                   x = lag(NH4.uM), y = lag(N_demand_guess),
+                   xend = NH4.uM, yend = N_demand_guess),
+               arrow = arrow(type="closed",length = unit(0.08, "npc")),
+               size=1) +
+  geom_point(aes(shape=CO2Treatment),size=4 ) +
+  scale_color_viridis_c(option = "C", "Warming") +
+  xlab (lab_string_N_supply) +
+  xlim(plot_xlims) +
+  ylim(plot_ylims) +
+  scale_shapes_for_co2_treatment 
+
+
+##in figure, both of these legends should be displayed because:
+  # N demand = total Uptake
+# thus, plot both:
+  panel_B_no_Y_label + 
+    ylab(lab_string_N_demand) 
+    
+  panel_B_no_Y_label +
+    ylab(lab_string_total_N_uptake) 
+    
+
+
+
+## panel A
+# panel_A <- biomass_data_treatment_means_many_year_means %>%
+
+N_demand_color <- "darkgreen"
+N_demand_string <- "N demand"
+
+N_supply_color <- "brown"
+N_supply_string <- "N supply"
+
+line_size <- 1
+point_size <- 3
+
+panel_A_NO_ECO2 <-
+  biomass_data_treatment_means_many_year_means %>%
+  filter(CO2Treatment == "Amb") %>%
+  mutate(N_demand_guess=SCAMbiomass^2 *T_from_cott *   tissue_N_content ) %>%
+  mutate(N_demand_guess_rescaled=rescale(N_demand_guess)) %>% 
+  mutate(NH4.uM_rescaled=rescale(NH4.uM))  %>% 
+  ggplot(aes(x=TempTreatment)) +
+  geom_point(aes(y=NH4.uM_rescaled,color=N_supply_string),size=point_size) +
+  geom_line(aes(y=NH4.uM_rescaled,color=N_supply_string)) + #optional line 
+  geom_point(aes(y=N_demand_guess_rescaled,color=N_demand_string),size=point_size) +
+  geom_line(aes(y=N_demand_guess_rescaled,color=N_demand_string)) +
+  xlab("Temperature (\u00B0C above ambient)") +
+  ylab("N supply and demand") +
+  scale_color_manual(
+    values = c(`N demand` = N_demand_color, `N supply` = N_supply_color),
+    guide = guide_legend(title = NULL)
+  ) +
+theme(
+    legend.position = "top",  # Move legend to the bottom
+    # legend.justification = "right"  # Align legend to the right
+    axis.ticks.y = element_blank(),
+    axis.text.y = element_blank()
+  )  
+
+panel_A_include_eCO2 <-  biomass_data_treatment_means_many_year_means %>%
+    ungroup() %>% 
+    mutate(N_demand_guess=SCAMbiomass^2 *T_from_cott *   tissue_N_content ) %>%
+    mutate(N_demand_guess_rescaled=rescale(N_demand_guess)) %>% 
+    mutate(NH4.uM_rescaled=rescale(NH4.uM))  %>% 
+    select(CO2Treatment,TempTreatment,starts_with("N_demand_guess"),starts_with("NH4.")) %>% 
+    mutate(NH4.uM_rescaled=NH4.uM_rescaled- 0.434) %>% 
+    ggplot(aes(x=TempTreatment)) +
+    #plot N supply
+    geom_point(aes(y=NH4.uM_rescaled,color=N_supply_string,shape=CO2Treatment),size=point_size) +
+    geom_line( data= . %>% filter(CO2Treatment == "Amb") , 
+               aes(y=NH4.uM_rescaled,color=N_supply_string)) + #optional line 
+    ## plot N demand
+    geom_point(aes(
+      y=N_demand_guess_rescaled,color=N_demand_string,shape=CO2Treatment),
+      size=point_size) +
+    geom_line( data= . %>% filter(CO2Treatment == "Amb") ,
+      aes(y=N_demand_guess_rescaled,color=N_demand_string)) +
+    xlab("Temperature (\u00B0C above ambient)") +
+    ylab("N supply and demand") +
+    scale_color_manual(
+      values = c(`N demand` = N_demand_color, `N supply` = N_supply_color),
+      guide = guide_legend(title = NULL)
+    ) +
+  theme(
+      legend.position = "top",  # Move legend to the bottom
+      # legend.justification = "right"  # Align legend to the right
+      axis.ticks.y = element_blank(),
+      axis.text.y = element_blank()
+    )  +
+     scale_shape_manual(values = c(21,19),
+                        # name = expression(paste("CO"[2], " treatment"))) 
+                        name = NULL) +
+      guides(shape = "none")
+
+
+###add a root plot
+
+  # roots_across_treatment_plot <-  
+  panel_C <-  root_plot_data_WITH_SE %>% 
+    ggplot(aes(x=TempTreatment,y=FineRoots_correct,shape=CO2Treatment )) +
+    #plot predictions
+    geom_point(
+      aes(x=TempTreatment,y=FineRoots_predicted,shape=CO2Treatment),
+               color="red",
+               size=5) +
+    geom_line(data= . %>% filter(CO2Treatment=="Amb"),
+              aes(x=TempTreatment,
+                  y=FineRoots_predicted),
+              color="red")  +
+    #observation plot
+    geom_point(size=5) +
+    geom_line(data= .  %>% filter(CO2Treatment=="Amb")) +
+    # ylab(expression(paste("belowground biomass (g/m"^"2",")"))) +
+    scale_shape_manual(values = c(21,19),
+                       name = expression(paste("CO"[2], " treatment"))) +
+    theme(legend.position = "none") +
+    geom_errorbar(
+       aes(ymin = FineRoots_correct - FineRoots_correct_se, 
+           ymax = FineRoots_correct + FineRoots_correct_se), 
+       width = 0.2) +  # Add error bars
+    xlab(lab_string_temperature_treatment) +
+    ylab(lab_string_fr_biomass)
+ 
+  panel_C 
+  
+ # panel_A | panel_B | panel_C 
+ panel_A_include_eCO2 |  panel_B | simple_root_plot
+
+
+
+```
+
+```{r fig-4-dicussions-predictions }
+#fig description
+## 
+# data need
+
+
+## this data created above 
+
+plot_ylim <- c(70,135)
+
+roots_across_treatment_pristine_NO_eCO2 <-  root_plot_data %>% 
+    filter(CO2Treatment=="Amb") %>%
+    ggplot(aes(x=TempTreatment,y=FineRoots_predicted,shape=CO2Treatment )) +
+    #observation plot
+    geom_point(size=point_size_discussion_plot,color="red") +
+    geom_line(data=. %>% filter(CO2Treatment=="Amb"),color="red") +
+    # ylab(expression(paste("annual root growth (g/m"^"2",")"))) +
+    ylab(lab_string_measured_fnpp_ONE_LINE) +
+    scale_shape_manual(values = c(19,21),
+                       name = expression(paste("CO"[2], " treatment"))) +
+    theme(legend.position = "none") +
+    xlab(lab_string_temperature_treatment) +
+    # ylab(lab_string_bg_npp) +
+    ylim(plot_ylim) +
+    ggtitle("pristine N conditions")
+   
+  roots_across_treatment_plot_polluted_NO_eCO2 <-  root_plot_data_plus_200 %>% 
+    filter(CO2Treatment=="Amb") %>%
+    ggplot(aes(x=TempTreatment,y=FineRoots_predicted,shape=CO2Treatment )) +
+    #observation plot
+    geom_point(size=point_size_discussion_plot,color="red") +
+    geom_line(data=. %>% filter(CO2Treatment=="Amb"),color="red") +
+    # ylab(lab_string_annual_root_growth) +
+    ylab(lab_string_measured_fnpp_ONE_LINE) +
+    scale_shape_manual(values = c(19,21),
+                       name = expression(paste("CO"[2], " treatment"))) +
+    theme(legend.position = "none") +
+    xlab(lab_string_temperature_treatment)  +
+    # ylab(lab_string_bg_npp) +
+    ylim(plot_ylim) +
+    ggtitle("eutrophic conditions")
+   
+roots_across_treatment_pristine_NO_eCO2 |
+  roots_across_treatment_plot_polluted_NO_eCO2
+
+  
+roots_across_treatment_pristine_NO_eCO2 |
+  roots_across_treatment_plot_polluted_NO_eCO2
+
+
+
+```
+
+```{r fig-4-with-eCO2}
+
+plot_ylim <- c(70,175)
+
+roots_across_treatment_pristine_YES_eCO2 <-  root_plot_data %>% 
+    # filter(CO2Treatment=="Amb") %>%
+    ggplot(aes(x=TempTreatment,y=FineRoots_predicted,shape=CO2Treatment )) +
+    #observation plot
+    geom_point(size=point_size_discussion_plot,color="red") +
+    geom_line(data=. %>% filter(CO2Treatment=="Amb"),color="red") +
+    ylab(expression(paste("annual root growth (g/m"^"2",")"))) +
+    scale_shape_manual(values = c(19,21),
+                       name = expression(paste("CO"[2], " treatment"))) +
+    theme(legend.position = "none") +
+    xlab(lab_string_temperature_treatment) +
+    # ylab(lab_string_bg_npp) +
+    ylim(plot_ylim) +
+    ggtitle("pristine N conditions")
+   
+  roots_across_treatment_plot_polluted_YES_eCO2 <-  
+    root_plot_data_plus_200 %>% 
+    # filter(CO2Treatment=="Amb") %>%
+    ggplot(aes(x=TempTreatment,y=FineRoots_predicted,shape=CO2Treatment )) +
+    #observation plot
+    geom_point(size=point_size_discussion_plot,color="red") +
+    geom_line(data=. %>% filter(CO2Treatment=="Amb"),color="red") +
+    ylab(lab_string_annual_root_growth) +
+    scale_shape_manual(values = c(19,21),
+                       name = expression(paste("CO"[2], " treatment"))) +
+    theme(legend.position = "none") +
+    xlab(lab_string_temperature_treatment)  +
+    # ylab(lab_string_bg_npp) +
+    ylim(plot_ylim) +
+    ggtitle("eutrophic conditions")
+   
+ roots_across_treatment_pristine_YES_eCO2 |
+  roots_across_treatment_plot_polluted_YES_eCO2
+
+ 
+  
+  
+```
+
